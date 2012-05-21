@@ -126,7 +126,7 @@ isAppRunning()
     if [ $html5_detection == 1 ];then
         if [[ "$activ_win_title" = *chromium-browser* || "$activ_win_title" = *Firefox* ]];then   
             #check if firefox or chromium is running.
-            if [ `pgrep -l firefox | grep -wc firefox` -ge 1 || `pgrep -l chromium-browse | grep -wc chromium-browse` -ge 1 ]; then
+            if [[ `pgrep -l firefox | grep -wc firefox` -ge 1 || `pgrep -l chromium-browse | grep -wc chromium-browse` -ge 1 ]]; then
                 return 1
             fi
         fi
