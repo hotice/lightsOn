@@ -10,7 +10,7 @@
 # fullscreen on Firefox and Chromium.
 # Can detect mplayer and VLC when they are fullscreen too but I have disabled
 # this by default.
-# lightsOn.sh needs xscreensaver or kscreensaver to work.
+# lightsOn.sh needs xscreensaver, kscreensaver or gnome-screensaver to work.
 
 # HOW TO USE: Start the script with the number of seconds you want the checks
 # for fullscreen to be done. Example:
@@ -21,40 +21,66 @@
 # If you don't pass an argument, the checks are done every 50 seconds.
 
 
-# Set the variable `screensaver' to the screensaver you use.
-# Valid options are:
-# * xscreensaver (default)
-# * kscreensaver (the KDE screensaver)
-screensaver=xscreensaver
-
 # Modify these variables if you want this script to detect if Mplayer,
 # VLC or Firefox Flash Video are Fullscreen and disable
-# xscreensaver/kscreensaver and PowerManagement.
+# xscreensaver/kscreensaver/gnome-screensaver and PowerManagement.
 mplayer_detection=0
 vlc_detection=0
 firefox_flash_detection=1
-firefox_mplayer_detection=1
 chromium_flash_detection=1
+html5_detection=1 #checks if the browser window is fullscreen; will disable the screensaver if the browser window is in fullscreen so it doesn't work correctly if you always use the browser (Firefox or Chromium) in fullscreen
+
 
 # YOU SHOULD NOT NEED TO MODIFY ANYTHING BELOW THIS LINE
 
 
+# enumerate all the attached screens
+displays=""
+while read id
+do
+    displays="$displays $id"
+done< <(xvinfo | sed -n 's/^screen #\([0-9]\+\)$/\1/p')
+
+# Detect screensaver been used (xscreensaver, kscreensaver, gnome-screensaver or none)
+if [ `pgrep -l xscreensaver | grep -wc xscreensaver` -ge 1 ];then
+    screensaver=xscreensaver
+elif [ `pgrep -l gnome-screensav | grep -wc gnome-screensav` -ge 1 ];then
+    screensaver=gnome-screensav
+elif [ `pgrep -l kscreensaver | grep -wc kscreensaver` -ge 1 ];then
+    screensaver=kscreensaver
+else
+    screensaver=None
+    echo "No screensaver detected"     
+fi
+
 
 checkFullscreen()
 {
+    # loop through every display looking for a fullscreen window
+    for display in $displays
+    do
+        #get id of active window and clean output
+        activ_win_id=`DISPLAY=:0.${display} xprop -root _NET_ACTIVE_WINDOW`
+        #activ_win_id=${activ_win_id#*# } #gives error if xprop returns extra ", 0x0" (happens on some distros)
+        activ_win_id=${activ_win_id:40:9}
 
-    #get id of active window and clean output
-    activ_win_id=`xprop -root _NET_ACTIVE_WINDOW`
-    activ_win_id=`echo ${activ_win_id:(-9)}`
-    # Check if Active Window (the foremost window) is in fullscreen state
-    isActivWinFullscreen=`xprop -id $activ_win_id | grep _NET_WM_STATE_FULLSCREEN`
-        if [[ "$isActivWinFullscreen" = *NET_WM_STATE_FULLSCREEN* ]];then
-            isAppRunning
-            var=$?
-            if [[ $var -eq 1 ]];then
-                delayScreensaver
+        # Skip invalid window ids (commented as I could not reproduce a case
+        # where invalid id was returned, plus if id invalid
+        # isActivWinFullscreen will fail anyway.)
+        #if [ "$activ_win_id" = "0x0" ]; then
+        #     continue
+        #fi
+        
+        # Check if Active Window (the foremost window) is in fullscreen state
+        isActivWinFullscreen=`DISPLAY=:0.${display} xprop -id $activ_win_id | grep _NET_WM_STATE_FULLSCREEN`
+            if [[ "$isActivWinFullscreen" = *NET_WM_STATE_FULLSCREEN* ]];then
+                isAppRunning
+                var=$?
+                if [[ $var -eq 1 ]];then
+                    delayScreensaver
+                fi
             fi
-        fi
+    done
 }
 
 
@@ -72,12 +98,12 @@ isAppRunning()
 
 
 
-    # Check if user want to detect Flash Video fullscreen on Firefox, modify variable firefox_mplayer_detection if you dont want Firefox mplayer detection
+    # Check if user want to detect Video fullscreen on Firefox, modify variable firefox_flash_detection if you dont want Firefox detection
     if [ $firefox_flash_detection == 1 ];then
-        if [[ "$activ_win_title" = *unknown* ]];then   
+        if [[ "$activ_win_title" = *unknown* || "$activ_win_title" = *plugin-container* ]];then
         # Check if plugin-container process is running
             flash_process=`pgrep -l plugin-containe | grep -wc plugin-containe`
-            #(why was I using this commented line avobe? delete if pgrep -lc works ok)
+            #(why was I using this line avobe? delete if pgrep -lc works ok)
             #flash_process=`pgrep -lc plugin-containe`
             if [[ $flash_process -ge 1 ]];then
                 return 1
@@ -85,27 +111,22 @@ isAppRunning()
         fi
     fi
 
-
-    # Check if user want to detect gecko-mplayer Video fullscreen on Firefox, modify variable firefox_mplayer_detection if you dont want Firefox mplayer detection
-    if [ $firefox_mplayer_detection == 1 ];then
-        if [[ "$activ_win_title" = *mplayer* ]];then
-        # Check if plugin-container process is running
-            flash_process=`pgrep -l plugin-containe | grep -wc plugin-containe`
-            #(why was I using this commented line avobe? delete if pgrep -lc works ok)
-            #flash_process=`pgrep -lc plugin-containe`
-            if [[ $flash_process -ge 1 ]];then
-                return 1
-            fi
-        fi
-    fi
-
-
+    
     # Check if user want to detect Video fullscreen on Chromium, modify variable chromium_flash_detection if you dont want Chromium detection
     if [ $chromium_flash_detection == 1 ];then
         if [[ "$activ_win_title" = *exe* ]];then   
         # Check if Chromium Flash process is running
-            flash_process=`pgrep -lfc "chromium-browser --type=plugin --plugin-path=/usr/lib/adobe-flashplugin"`
-            if [[ $flash_process -ge 1 ]];then
+            if [[ `pgrep -lfc "chromium-browser --type=plugin --plugin-path=/usr/lib/adobe-flashplugin"` -ge 1 || `pgrep -lfc "chromium-browser --type=plugin --plugin-path=/usr/lib/flashplugin-installer"` -ge 1 ]];then
+                return 1
+            fi
+        fi
+    fi
+
+    #html5 (Firefox or Chromium full-screen)
+    if [ $html5_detection == 1 ];then
+        if [[ "$activ_win_title" = *chromium-browser* || "$activ_win_title" = *Firefox* ]];then   
+            #check if firefox or chromium is running.
+            if [ `pgrep -l firefox | grep -wc firefox` -ge 1 || `pgrep -l chromium-browse | grep -wc chromium-browse` -ge 1 ]; then
                 return 1
             fi
         fi
@@ -144,12 +165,17 @@ return 0
 
 delayScreensaver()
 {
+
     # reset inactivity time counter so screensaver is not started
-    if [ "$screensaver" == "kscreensaver" ]; then
-	qdbus org.freedesktop.ScreenSaver /ScreenSaver SimulateUserActivity > /dev/null
-    else
-	xscreensaver-command -deactivate > /dev/null
+    if [ "$screensaver" == "xscreensaver" ]; then
+ 	#This tells xscreensaver to pretend that there has just been user activity. This means that if the screensaver is active (the screen is blanked), then this command will cause the screen to un-blank as if there had been keyboard or mouse activity. If the screen is locked, then the password dialog will pop up first, as usual. If the screen is not blanked, then this simulated user activity will re-start the countdown (so, issuing the -deactivate command periodically is one way to prevent the screen from blanking.)
+    	xscreensaver-command -deactivate > /dev/null
+    elif [ "$screensaver" == "gnome-screensav" ]; then
+	dbus-send --session --type=method_call --dest=org.gnome.ScreenSaver --reply-timeout=20000 /org/gnome/ScreenSaver org.gnome.ScreenSaver.SimulateUserActivity > /dev/null
+    elif [ "$screensaver" == "kscreensaver" ]; then
+    	qdbus org.freedesktop.ScreenSaver /ScreenSaver SimulateUserActivity > /dev/null
     fi
+
 
     #Check if DPMS is on. If it is, deactivate and reactivate again. If it is not, do nothing.    
     dpmsStatus=`xset -q | grep -ce 'DPMS is Enabled'`
@@ -187,8 +213,5 @@ do
 done
 
 
-exit 0
+exit 0    
 
-
-
-    
